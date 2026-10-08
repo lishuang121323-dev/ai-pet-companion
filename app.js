@@ -1,5 +1,8 @@
 const $ = id => document.getElementById(id)
-const state = { sourceImage: '', generatedImage: '', name: '团团', breed: '金毛寻回犬', trait: '黏人', mood: 86, hunger: 72, energy: 68 }
+const state = { sourceImage: '', generatedImage: '', dreamMakerImageUrl: '', name: '团团', breed: '金毛寻回犬', trait: '黏人', mood: 86, hunger: 72, energy: 68 }
+function savePet() {
+  sessionStorage.setItem('ai-pet-companion', JSON.stringify({ ...state, sourceImage: '' }))
+}
 
 function toast(message) {
   const el = $('toast')
@@ -10,6 +13,7 @@ function toast(message) {
 function setGeneratedPet(image, dreamMakerImageUrl = '') {
   state.generatedImage = image
   state.dreamMakerImageUrl = dreamMakerImageUrl
+  savePet()
   ;['heroImage', 'resultImage', 'roomImage'].forEach(id => {
     const el = $(id)
     el.src = image
@@ -88,10 +92,10 @@ $('generateBtn').addEventListener('click', async () => {
     if (!response.ok) throw new Error(data.error)
     finishGeneration(data.imageUrl, false, data.dreamMakerImageUrl)
   } catch (error) {
-    btn.disabled = false
-    btn.textContent = '✨ 重新生成专属数字宠物'
-    $('aiStatus').textContent = 'AIGW 生成失败'
-    toast(`AIGW 未生成：${error.message || '未知错误'}`)
+    btn.textContent = '正在生成可演示动作…'
+    const demoImage = await makeDemoPet(state.sourceImage)
+    if (!demoImage) { btn.disabled = false; btn.textContent = '✨ 生成专属数字宠物'; return toast(error.message || '生成失败，请重试') }
+    finishGeneration(demoImage, true)
   }
 })
 const text = { pet: '被你轻轻摸过，它开心地靠近了你。', feed: '好香！它低下头，开心地吃了起来。', play: '它叼来玩具，兴奋地转起了圈。', chat: '我最喜欢和你聊天。今天也要记得喝水、早点休息哦！', run: '收到！它像一阵风一样在房间里跑了两圈。', jump: '看我的！它高高跳起，稳稳落在地毯上。', sleep: '它蜷成一团，发出轻轻的呼噜声。' }
@@ -121,7 +125,7 @@ async function playAction(type) {
   const video = $('roomVideo')
   $('petBubble').textContent = '正在生成真实动作视频，请稍候…'
   try {
-    const response = await fetch('/api/generate-action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageUrl: state.dreamMakerImageUrl, action: type }) })
+    const response = await fetch('/api/generate-action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dreamMakerImageUrl: state.dreamMakerImageUrl, action: type }) })
     const data = await response.json()
     if (!response.ok) throw new Error(data.error)
     video.src = data.videoUrl

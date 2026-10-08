@@ -17,8 +17,8 @@ function base64Url(value) {
 }
 
 function dreamMakerToken() {
-  const accessKey = process.env.DM_ACCESS_KEY
-  const secretKey = process.env.DM_SECRET_KEY
+  const accessKey = process.env.DM_ACCESS_KEY?.trim()
+  const secretKey = process.env.DM_SECRET_KEY?.trim()
   if (!accessKey || !secretKey) return ''
   const now = Math.floor(Date.now() / 1000)
   const header = base64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
@@ -32,8 +32,7 @@ function headers() {
 }
 
 function videoHeaders() {
-  const apiKey = process.env.DM_API_KEY
-  return { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+  return headers()
 }
 
 function extractImageUrl(data) {
@@ -76,6 +75,13 @@ app.get('/api/generated-image', async (request, response) => {
     response.status(502).end()
   }
 })
+
+function dreamMakerAssetUrl(url) {
+  if (url.startsWith('https://dreammaker.netease.com/static/image/')) return url
+  if (url.startsWith(`${baseUrl}/static/image/`)) return url.replace(`${baseUrl}/`, 'https://dreammaker.netease.com/')
+  if (url.startsWith('static/image/')) return `https://dreammaker.netease.com/${url}`
+  return ''
+}
 
 function extractVideoUrl(data) {
   const output = data?.data?.output || data?.data || {}
@@ -124,7 +130,8 @@ app.post('/api/generate-pet', async (request, response) => {
       if (state === 'success') {
         const imageUrl = extractImageUrl(status)
         if (!imageUrl) throw new Error('DreamMaker 生成成功但未返回图片地址。')
-        return response.json({ imageUrl: `/api/generated-image?url=${encodeURIComponent(imageUrl)}`, dreamMakerImageUrl: imageUrl.startsWith('http') ? imageUrl : `${baseUrl}/${imageUrl.replace(/^\//, '')}` })
+        const dreamMakerImageUrl = imageUrl.startsWith('http') ? imageUrl : `${baseUrl}/${imageUrl.replace(/^\//, '')}`
+        return response.json({ imageUrl: `/api/generated-image?url=${encodeURIComponent(dreamMakerImageUrl)}`, dreamMakerImageUrl })
       }
       if (['failed', 'fail', 'error'].includes(state)) throw new Error(status.data?.message || 'DreamMaker 图像生成失败。')
     }
@@ -135,9 +142,9 @@ app.post('/api/generate-pet', async (request, response) => {
 })
 
 app.post('/api/generate-action', async (request, response) => {
-  const { imageUrl, action } = request.body
-  if (typeof imageUrl !== 'string' || !imageUrl) return response.status(400).json({ error: '缺少宠物参考图。' })
-  if (!(process.env.DM_API_KEY || process.env.AIGW_API_KEY)) return response.status(503).json({ error: '未配置 DreamMaker API Key。' })
+  const { dreamMakerImageUrl, action } = request.body
+  if (typeof dreamMakerImageUrl !== 'string' || !dreamMakerImageUrl) return response.status(400).json({ error: '缺少宠物参考图。' })
+  if (!dreamMakerToken()) return response.status(503).json({ error: '未配置 DreamMaker AccessKey/SecretKey。' })
   const actions = {
     idle: '宠物自然呼吸，眨眼，耳朵和尾巴轻轻摆动，镜头固定，全身保持完整可见。',
     pet: '宠物开心撒娇，向前蹭一蹭，尾巴大幅摇动，耳朵轻轻抖动，镜头固定，全身保持完整可见。',
@@ -147,30 +154,42 @@ app.post('/api/generate-action', async (request, response) => {
     jump: '宠物先压低身体蓄力，然后高高跳起，平稳落地，四肢和尾巴自然运动，镜头固定，全身保持完整可见。',
     sleep: '宠物蜷卧睡觉，胸口均匀呼吸，耳朵偶尔轻动，尾巴轻微摆动，镜头固定，全身保持完整可见。'
   }
+  let stage = '提交 Seedance 任务'
   try {
+    const imageUrl = dreamMakerAssetUrl(dreamMakerImageUrl)
+    if (!imageUrl.startsWith(`${baseUrl}/static/image/`) || imageUrl.length > 4096) return response.status(400).json({ error: '宠物参考图链接无效，请重新生成宠物形象。' })
     const subApp = process.env.DM_VIDEO_SUB_APP || 'reference'
     const submission = await requestJson(`${baseUrl}/api/v1/apps/jimeng-video/run?sub_app_name=${encodeURIComponent(subApp)}`, {
       method: 'POST', headers: videoHeaders(), body: JSON.stringify({ params: {
-        aspect_ratio: '1:1', display_model: 'Seedance 2.0 Fast', duration: 5,
-        generate_audio: false, model_name: 'doubao-seedance-2-0-fast', prompt: actions[action] || actions.idle,
-        ratio: '1:1', reference_image: [imageUrl], resolution: '720p', seed: 1,
-        task_mode: 'doubao-seedance-2-0-fast', watermark: false
+        aspect_ratio: '1:1',
+        duration: 5,
+        generate_audio: false,
+        model_name: 'doubao-seedance-2-0-fast',
+        prompt: actions[action] || actions.idle,
+        ratio: '1:1',
+        reference_image: [imageUrl],
+        resolution: '720p',
+        seed: 1,
+        task_mode: 'doubao-seedance-2-0-fast',
+        watermark: false
       } })
     })
     const taskId = submission.data?.task_id
     if (!taskId) throw new Error('Seedance 未返回任务 ID。')
+    stage = '查询 Seedance 任务'
     for (let attempt = 0; attempt < 180; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 3000))
-      const status = await requestJson(`${baseUrl}/api/v1/apps/jimeng-video/status?sub_app_name=${encodeURIComponent(subApp)}&task_id=${encodeURIComponent(taskId)}`, { headers: videoHeaders() })
+      const status = await requestJson(`${baseUrl}/api/v1/apps/jimeng-video/status?sub_app_name=${encodeURIComponent(subApp)}&task_id=${encodeURIComponent(taskId)}`, { headers: headers() })
+      if (status.code !== 0) throw new Error(`${status.message || '视频状态查询失败'}（code ${status.code}）`)
       if (status.data?.status === 'success') {
         const videoUrl = extractVideoUrl(status)
-        if (!videoUrl) throw new Error('Seedance 生成成功但未返回视频。')
+        if (!videoUrl) throw new Error(`视频任务成功但响应中没有视频地址：${JSON.stringify(status.data).slice(0, 700)}`)
         return response.json({ videoUrl })
       }
-      if (['failed', 'fail', 'error'].includes(status.data?.status)) throw new Error(status.data?.message || 'Seedance 视频生成失败。')
+      if (['failed', 'fail', 'error'].includes(status.data?.status)) throw new Error(status.data?.message || `视频任务失败：${JSON.stringify(status.data).slice(0, 700)}`)
     }
     throw new Error('Seedance 生成超时。')
-  } catch (error) { response.status(502).json({ error: error.message || 'Seedance 视频生成失败。' }) }
+  } catch (error) { response.status(502).json({ error: `${stage}: ${error.message || 'Seedance 请求失败。'}` }) }
 })
 
 app.listen(port, () => console.log(`AI Pet app listening on ${port}`))
