@@ -121,23 +121,12 @@ async function playAction(type) {
   const pet = roomPet()
   clearAction(pet)
   burst(type)
-  if (!state.dreamMakerImageUrl) return pet.classList.add('pet-action-idle')
   const video = $('roomVideo')
-  $('petBubble').textContent = '正在生成真实动作视频，请稍候…'
-  try {
-    const response = await fetch('/api/generate-action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dreamMakerImageUrl: state.dreamMakerImageUrl, action: type }) })
-    const data = await response.json()
-    if (!response.ok) throw new Error(data.error)
-    video.src = data.videoUrl
-    video.hidden = false
-    $('roomImage').hidden = true
-    $('roomEmoji').style.display = 'none'
-    await video.play()
-    video.onended = () => { video.hidden = true; $('roomImage').hidden = false; $('roomImage').classList.add('pet-action-idle') }
-  } catch (error) {
-    $('petBubble').textContent = `动作视频生成失败：${error.message || '请重试'}`
-    pet.classList.add('pet-action-idle')
-  }
+  video.pause()
+  video.removeAttribute('src')
+  video.hidden = true
+  $('roomImage').hidden = false
+  pet.classList.add(`pet-action-${type === 'feed' ? 'eat' : type === 'pet' ? 'cuddle' : type}`)
 }
 document.querySelector('.interactions').addEventListener('click', async event => { const type = event.target.closest('button')?.dataset.action; if (!type) return; state.mood = Math.min(100, state.mood + (type === 'sleep' ? 0 : 5)); if (type === 'feed') state.hunger = Math.min(100, state.hunger + 12); if (type === 'play' || type === 'run' || type === 'jump') state.energy = Math.max(0, state.energy - 9); $('petBubble').textContent = text[type]; $('chatText').textContent = `“ ${text[type]} ”`; await playAction(type); updateMeters() })
 function enableDrag() {
