@@ -10,5 +10,11 @@ services:
         sync: false
       - key: AIGW_APP_KEY
         sync: false
+      - key: DM_ACCESS_KEY
+        sync: false
+      - key: DM_SECRET_KEY
+        sync: false
+      - key: DM_SUB_APP
+        value: gpt-image-2.5-sunburst
       - key: AIGW_IMAGE_MODEL
         value: gpt-image-2.5-sunburst
