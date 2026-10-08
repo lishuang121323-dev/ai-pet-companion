@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: ai-pet-companion
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: AIGW_APP_ID
+        sync: false
+      - key: AIGW_APP_KEY
+        sync: false
+      - key: AIGW_IMAGE_MODEL
+        value: gpt-image-2.5-sunburst
